@@ -8,8 +8,12 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-Add-Type -AssemblyName System.IO.Compression
-Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+# 压缩库：Windows PowerShell 5.1 需要显式加载，PowerShell 7 上这些程序集名不存在会直接抛错，
+# 所以逐个 try 掉；下面只用 ZipArchive（两个版本都在 System.IO.Compression 里）。
+foreach ($asm in @("System.IO.Compression", "System.IO.Compression.FileSystem")) {
+    try { Add-Type -AssemblyName $asm -ErrorAction Stop } catch { }
+}
 
 # ── 路径 ────────────────────────────────────────────────────────────────
 # $PSScriptRoot = <repo>\.github\scripts
@@ -71,6 +75,7 @@ function Get-CrCount([byte[]]$b) {
 
 # ── 发现模组包 ──────────────────────────────────────────────────────────
 Write-Section "发现模组包"
+Write-Host "  PowerShell $($PSVersionTable.PSVersion) | 压缩库 OK" -ForegroundColor DarkGray
 $modDirs = @(Get-ChildItem -LiteralPath $repoRoot -Directory |
     Where-Object { -not $_.Name.StartsWith(".") -and (Test-Path -LiteralPath (Join-Path $_.FullName "filelist.xml")) })
 
@@ -191,6 +196,8 @@ function New-PluginZipArchive {
 
     if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
 
+    # 只用 ZipArchive + 流拷贝：不依赖 System.IO.Compression.ZipFile / ZipFileExtensions，
+    # 这两个类型在 PowerShell 7 与 5.1 上的归属程序集不同，容易在 CI 上炸。
     $fs = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::CreateNew)
     try {
         $zip = [System.IO.Compression.ZipArchive]::new($fs, [System.IO.Compression.ZipArchiveMode]::Create, $false)
@@ -198,26 +205,30 @@ function New-PluginZipArchive {
             foreach ($e in $Entries) {
                 if (-not (Test-Path -LiteralPath $e.Source)) { throw "打包缺失源文件：'$($e.Source)'" }
                 if ($e.EntryName.Contains('\')) { throw "ZIP 条目名禁止反斜杠：'$($e.EntryName)'" }
-                [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
-                    $zip, $e.Source, $e.EntryName,
-                    [System.IO.Compression.CompressionLevel]::Optimal) | Out-Null
+                $entry = $zip.CreateEntry([string]$e.EntryName, [System.IO.Compression.CompressionLevel]::Optimal)
+                $dst = $entry.Open()
+                $src = [System.IO.File]::OpenRead($e.Source)
+                try { $src.CopyTo($dst) } finally { $src.Dispose(); $dst.Dispose() }
             }
         } finally { $zip.Dispose() }
     } finally { $fs.Dispose() }
 
-    $verify = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+    $verifyFs = [System.IO.File]::OpenRead($ZipPath)
     try {
-        if ($verify.Entries.Count -ne $Entries.Count) {
-            throw "ZIP 条目数不匹配（$ZipPath）：实际=$($verify.Entries.Count) 期望=$($Entries.Count)"
-        }
-        foreach ($entry in $verify.Entries) {
-            if ($entry.FullName.Contains('\')) { throw "ZIP 含反斜杠条目：'$($entry.FullName)'" }
-            if (-not $entry.FullName.StartsWith($RequiredPrefix, [System.StringComparison]::Ordinal)) {
-                throw "ZIP 条目根路径异常：'$($entry.FullName)'（应以 $RequiredPrefix 开头）"
+        $verify = [System.IO.Compression.ZipArchive]::new($verifyFs, [System.IO.Compression.ZipArchiveMode]::Read)
+        try {
+            if ($verify.Entries.Count -ne $Entries.Count) {
+                throw "ZIP 条目数不匹配（$ZipPath）：实际=$($verify.Entries.Count) 期望=$($Entries.Count)"
             }
-            if ($entry.Length -le 0) { throw "ZIP 条目为空：'$($entry.FullName)'" }
-        }
-    } finally { $verify.Dispose() }
+            foreach ($entry in $verify.Entries) {
+                if ($entry.FullName.Contains('\')) { throw "ZIP 含反斜杠条目：'$($entry.FullName)'" }
+                if (-not $entry.FullName.StartsWith($RequiredPrefix, [System.StringComparison]::Ordinal)) {
+                    throw "ZIP 条目根路径异常：'$($entry.FullName)'（应以 $RequiredPrefix 开头）"
+                }
+                if ($entry.Length -le 0) { throw "ZIP 条目为空：'$($entry.FullName)'" }
+            }
+        } finally { $verify.Dispose() }
+    } finally { $verifyFs.Dispose() }
 }
 
 # 文档随包分发：放进每个模组目录内（与 BepInEx 生态的惯例一致）
