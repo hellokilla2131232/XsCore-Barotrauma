@@ -1,3 +1,5 @@
+print(">>> cl_ailod.lua 已开始执行 <<<")
+
 -- =====================================================================
 -- cl_ailod — AILod 参数设置面板 + 控制台命令
 --
@@ -24,16 +26,27 @@
 --      否则文本框会按默认逻辑处理（可能导致值被吃掉）。
 -- =====================================================================
 
--- 配置文件路径：优先和 C# 用同一个（游戏根目录）
--- LuaCs 的 File.Write 在 1.15 里不可用（静默失败），必须走 System.IO + 绝对路径
+-- 配置文件路径
+-- 【关键】LuaCs 的 File.* 只能写「模组目录」。
+--   PF 的做法：PerformanceFix.Path = ...  然后 File.Write(Path .. "/config.json")
+--   `...` 是 LuaCs 传给 Autorun 脚本的 varargs，值就是模组根目录。
+--   游戏根目录对 Lua 是只读的（写了静默失败），必须用模组目录。
+local MOD_PATH = select(1, ...)
+print("[AILod] MOD_PATH = [" .. tostring(MOD_PATH) .. "]")
+
 local function GetCfgPath()
+    if type(MOD_PATH) == "string" and MOD_PATH ~= "" then
+        return MOD_PATH .. "/AILod.cfg"
+    end
+
+    -- 拿不到 varargs 时退回游戏根目录（C# 那边也用同一逻辑）
     local ok, base = pcall(function()
         return System.AppDomain.CurrentDomain.BaseDirectory
     end)
     if ok and base and base ~= "" then
         return base .. "AILod.cfg"
     end
-    -- 退化：相对路径（C# 可能读不到，但至少不崩）
+
     return "AILod.cfg"
 end
 
@@ -41,9 +54,10 @@ local CFG_PATH = GetCfgPath()
 local CFG_FILE = CFG_PATH
 
 local defaults = {
-    farRadius    = 6000,
+    farRadius    = 2000,
     idleInterval = 0.25,
     enabled      = true,
+    combatAuto   = true,    -- 战斗时自动缩小远场半径
 }
 
 -- 滑块范围
@@ -51,8 +65,8 @@ local DIST_MIN, DIST_MAX = 1000, 12000
 local IV_MIN,   IV_MAX   = 0.1,  2.0
 
 -- 建议范围（写进小贴士）
-local DIST_SUGGEST = "6000 ~ 8000"
-local IV_SUGGEST   = "0.25 ~ 0.50"
+local DIST_SUGGEST = "1500 ~ 3000"
+local IV_SUGGEST   = "0.20 ~ 0.35"
 
 local cfg = {}
 local _saveLogged = false
@@ -61,11 +75,28 @@ local _saveLogged = false
 -- LuaUserData.CreateStatic 不需要预先 RegisterType，只要类型存在就能拿到静态访问器
 local AILodCs = nil
 do
+    -- 第一步：直接 CreateStatic
     local ok, v = pcall(function()
         return LuaUserData.CreateStatic("XsCore.AILodPlugin")
     end)
     if ok and v ~= nil then
         AILodCs = v
+        print("[AILod] C# 接入成功（CreateStatic）")
+    else
+        print("[AILod] CreateStatic 失败: " .. tostring(v))
+
+        -- 第二步：先 RegisterType 再 CreateStatic
+        local ok2, err2 = pcall(function()
+            LuaUserData.RegisterType("XsCore.AILodPlugin")
+            return LuaUserData.CreateStatic("XsCore.AILodPlugin")
+        end)
+        if ok2 and err2 ~= nil then
+            AILodCs = err2
+            print("[AILod] C# 接入成功（RegisterType 后 CreateStatic）")
+        else
+            print("[AILod] RegisterType 也失败: " .. tostring(err2))
+            print("[AILod] 将只靠 AILod.cfg 文件（需手动编辑）")
+        end
     end
 end
 
@@ -221,6 +252,16 @@ local function BuildPanel()
             end
             SaveCfg()
         end, cfg.enabled)
+
+        -- 战斗自适应开关
+        easySettings.TickBox(content, "战斗时自动缩小远场（推荐开启）", function (state)
+            cfg.combatAuto = state
+            SaveCfg()
+        end, cfg.combatAuto)
+
+        GUI.TextBlock(GUI.RectTransform(Vector2(1, 0.05), rt),
+            "玩家 3000px 内出现 >=2 个其他角色时判定为战斗中，\n" ..
+            "远场半径自动缩到 25%（例如 2000 → 500），打完自动恢复。", nil, nil)
 
         -------------------------------------------------------------
         -- 距离：输入框 + 滑块
@@ -393,6 +434,7 @@ local function ShowStatus()
     print("  远场半径    : " .. tostring(math.floor(cfg.farRadius)) .. " px")
     print("                范围 " .. DIST_MIN .. " ~ " .. DIST_MAX .. "，建议 " .. DIST_SUGGEST)
     print("  闲置间隔    : " .. string.format("%.2f", cfg.idleInterval) .. " 秒")
+    print("  战斗自适应  : " .. (cfg.combatAuto and "开（战斗中远场缩到 25%）" or "关"))
     print("                范围 " .. string.format("%.2f", IV_MIN) .. " ~ " ..
           string.format("%.2f", IV_MAX) .. "，建议 " .. IV_SUGGEST)
     print("  配置文件    : " .. CFG_FILE)
@@ -409,9 +451,21 @@ local function ShowStatus()
 end
 
 Game.AddCommand("cl_ailod", "查看/设置 AILod 参数", function (args)
-    local a = args
-    if a == nil then a = "" end
-    a = tostring(a)
+    -- 调试：把 args 的真实类型和值打出来
+    print("[AILod] args type=" .. type(args) .. " value=[" .. tostring(args) .. "]")
+
+    -- LuaCs 的 AddCommand 回调第一个参数是 table（参数数组）
+    local parts = {}
+    if type(args) == "table" then
+        local i = 1
+        while args[i] ~= nil do
+            parts[#parts + 1] = tostring(args[i])
+            i = i + 1
+        end
+    elseif args ~= nil then
+        parts[1] = tostring(args)
+    end
+    local a = table.concat(parts, " ")
     a = a:gsub("^%s+", ""):gsub("%s+$", "")
 
     if a == "" then

@@ -3,6 +3,9 @@
 -- 命令：cl_status
 -- =====================================================================
 
+local MOD_PATH = select(1, ...)
+print("[cl_status] MOD_PATH = [" .. tostring(MOD_PATH) .. "]")
+
 local function ok(b) return b and "[OK]" or "[--]" end
 
 local function TryRead(fn)
@@ -46,6 +49,41 @@ Game.AddCommand("cl_status", "检查所有优化模组的加载状态", function
     ---------------------------------------------------------------
     -- 二、C# 层（无法直接从 Lua 读，用间接指标）
     ---------------------------------------------------------------
+    print("")
+    -- ---------------------------------------------------------------
+    -- AILod：读共享配置文件（C# 那边 5 秒热重载）
+    -- 注意：LuaUserData.CreateStatic 拿不到自定义插件的类型，
+    --       所以不走内存直连，改成读 AILod.cfg。
+    -- ---------------------------------------------------------------
+    do
+        local cfgPath
+        if type(MOD_PATH) == "string" and MOD_PATH ~= "" then
+            cfgPath = MOD_PATH .. "/AILod.cfg"
+        else
+            cfgPath = "AILod.cfg"
+        end
+
+        local exists, content = false, nil
+        pcall(function()
+            exists = System.IO.File.Exists(cfgPath)
+            if exists then content = System.IO.File.ReadAllText(cfgPath) end
+        end)
+
+        if exists and content and content ~= "" then
+            print("  [OK] AILod.cfg 已存在")
+            print("       路径: " .. tostring(cfgPath))
+            for line in content:gmatch("[^\r\n]+") do
+                local s = line:gsub("^%s+", ""):gsub("%s+$", "")
+                if s ~= "" and s:sub(1, 1) ~= "#" then
+                    print("       " .. s)
+                end
+            end
+        else
+            print("  [--] AILod.cfg 不存在或读不到")
+            print("       路径: " .. tostring(cfgPath))
+        end
+    end
+
     print("")
     print("[C# 层]（启动日志里搜 [XsStatusThrottle] / [XsAILod]）")
 

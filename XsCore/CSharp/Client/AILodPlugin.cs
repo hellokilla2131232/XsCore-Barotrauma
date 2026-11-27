@@ -7,6 +7,7 @@ using System.Reflection;
 using System.Text;
 
 using HarmonyLib;
+using Barotrauma.LuaCs;
 using Microsoft.Xna.Framework;
 
 using Barotrauma;
@@ -49,8 +50,35 @@ namespace XsAILod
         private static float _nextConfigCheck = 0f;
         private static DateTime _lastConfigWrite = DateTime.MinValue;
 
-        private static string ConfigPath =>
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
+        // 配置文件路径：优先模组目录（Lua 的 File.Write 只能写这里），
+        // 拿不到模组包时才退回游戏根目录。
+        private static string _configPathCache;
+
+        private static string ConfigPath
+        {
+            get
+            {
+                if (_configPathCache != null) return _configPathCache;
+
+                try
+                {
+                    var pms = LuaCsSetup.Instance?.PluginManagementService;
+                    if (pms != null &&
+                        pms.TryGetPackageForPlugin<AILodPlugin>(out ContentPackage pkg) &&
+                        pkg != null &&
+                        !string.IsNullOrEmpty(pkg.Dir))
+                    {
+                        _configPathCache = Path.Combine(pkg.Dir, ConfigFileName);
+                        return _configPathCache;
+                    }
+                }
+                catch { }
+
+                _configPathCache = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory, ConfigFileName);
+                return _configPathCache;
+            }
+        }
 
         private static readonly Dictionary<Character, float> _next = new Dictionary<Character, float>();
         private static readonly Stopwatch _clock = Stopwatch.StartNew();
@@ -59,6 +87,18 @@ namespace XsAILod
         private static long _passed;
         private static int _patched;
         private static float _nextStatsLog = 0f;   // 统计日志节流
+
+        // ---------- 战斗感知（与 XsPerf 语义一致）----------
+        // 判定依据：我方队伍（同 TeamID）的总血量是否下降 —— 不判断敌我，不依赖 mod 阵营配置。
+        // 战斗中远场半径自动缩到 CombatFarScale 倍，避免「队友在旁边打，远处 AI 还在降频」。
+        private const float CombatFarScale = 0.25f;      // 战斗中远场缩到 25%
+        private const float CombatHoldSeconds = 30f;     // 掉血后保持战斗状态 30 秒
+        private static bool  _combatAuto = true;         // 战斗自适应开关（配置可关）
+        private static bool  _inCombat;
+        private static float _nextCombatCheck;
+        private static float _lastTeamHealth = -1f;      // 我方队伍总血量（用于检测掉血）
+        private static float _combatUntil;               // 战斗状态持续到什么时候
+        private static bool  _lastInCombat;              // 用于检测状态切换，打日志
 
         // 受伤唤醒：血量下降 → 立刻退出降频
         private static readonly Dictionary<Character, float> _lastHealth
@@ -120,7 +160,8 @@ namespace XsAILod
                     "\n" +
                     "farRadius=6000\n" +
                     "idleInterval=0.25\n" +
-                    "enabled=true\n";
+                    "enabled=true\n" +
+                    "combatAuto=true\n";
 
                 File.WriteAllText(path, content, new UTF8Encoding(false));
                 _lastConfigWrite = File.GetLastWriteTimeUtc(path);
@@ -173,6 +214,10 @@ namespace XsAILod
                         case "idleInterval":
                             if (float.TryParse(val, out float ii) && ii > 0f) { _idleInterval = ii; changed = true; }
                             break;
+                        case "combatAuto":
+                            _combatAuto = (val == "true" || val == "1");
+                            changed = true;
+                            break;
                         case "movingSpeed":
                             if (float.TryParse(val, out float ms) && ms >= 0f) { _movingSpeed = ms; changed = true; }
                             break;
@@ -184,7 +229,8 @@ namespace XsAILod
                     _next.Clear();  // 参数变了，清空计时表让新值立刻生效
                     LuaCsLogger.Log(
                         $"[XsAILod] 配置已重载 | enabled={_enabled} | " +
-                        $"farRadius={_farRadius:F0} | idleInterval={_idleInterval:F2}s");
+                        $"farRadius={_farRadius:F0} | idleInterval={_idleInterval:F2}s | " +
+                        $"combatAuto={_combatAuto}");
                 }
             }
             catch (Exception e)
@@ -261,6 +307,92 @@ namespace XsAILod
             catch { return 1f; }
         }
 
+        // ---------- 战斗状态判定（每 0.5 秒一次）----------
+        // 判定依据：我方队伍（同 TeamID）的总血量是否下降。
+        // 不判断敌我、不依赖任何 mod 的阵营配置——只认「自己人在流血」这个硬事实。
+        // 掉血后战斗状态保持 CombatHoldSeconds 秒，避免战斗中出现「打一下停三秒」的空档。
+        private static void UpdateCombatState(float now)
+        {
+            if (!_combatAuto)
+            {
+                if (_lastInCombat) { _lastInCombat = false; }
+                _inCombat = false;
+                return;
+            }
+
+            if (now >= _nextCombatCheck)
+            {
+                _nextCombatCheck = now + 0.5f;
+
+                // PVP 模式：没有「AI 参战」的概念，战斗自适应直接失效
+                try
+                {
+                    if (GameMain.GameSession?.GameMode is PvPMode)
+                    {
+                        if (_lastInCombat)
+                        {
+                            _lastInCombat = false;
+                            LuaCsLogger.Log("[XsAILod] PVP 模式，战斗自适应失效");
+                        }
+                        _inCombat = false;
+                        return;
+                    }
+                }
+                catch { }
+
+                try
+                {
+                    Character pc = Character.Controlled;
+                    if (pc == null || pc.IsDead)
+                    {
+                        _inCombat = false;
+                        _lastTeamHealth = -1f;
+                        _combatUntil = 0f;
+                    }
+                    else
+                    {
+                        var team = pc.TeamID;   // 1.15 是 CharacterTeamType 枚举，不是 byte
+
+                        float total = 0f;
+                        int count = 0;
+
+                        foreach (Character c in Character.CharacterList)
+                        {
+                            if (c == null || c.IsDead || c.Removed) continue;
+                            if (c.TeamID != team) continue;   // 只算同队
+                            total += GetHealth(c);
+                            count++;
+                        }
+
+                        if (count > 0)
+                        {
+                            // 总血量下降 → 有人在挨打 → 进入/延长战斗
+                            if (_lastTeamHealth >= 0f && total < _lastTeamHealth - 0.0001f)
+                            {
+                                _combatUntil = now + CombatHoldSeconds;
+                            }
+                            _lastTeamHealth = total;
+                        }
+                    }
+                }
+                catch
+                {
+                    _inCombat = false;
+                }
+
+                _inCombat = (now < _combatUntil);
+
+                if (_inCombat != _lastInCombat)
+                {
+                    _lastInCombat = _inCombat;
+                    LuaCsLogger.Log(
+                        $"[XsAILod] 战斗状态 {( _inCombat ? "开始" : "结束")} | " +
+                        $"远场 {(_inCombat ? _farRadius * CombatFarScale : _farRadius):F0}px | " +
+                        $"t={now:F0}s");
+                }
+            }
+        }
+
         // ---------- 到最近玩家的距离 ----------
         private static float NearestPlayerDist(Character c)
         {
@@ -293,6 +425,9 @@ namespace XsAILod
                 }
                 _entered++;
 
+                // 战斗状态判定（内部 0.5 秒节流）
+                UpdateCombatState((float)_clock.Elapsed.TotalSeconds);
+
                 if (__instance.IsPlayer) return true;
                 if (__instance == Character.Controlled) return true;
                 _notPlayer++;
@@ -313,7 +448,8 @@ namespace XsAILod
                 _speedOk++;
 
                 // 玩家附近 → 全速
-                if (NearestPlayerDist(__instance) <= _farRadius) return true;
+                float effectiveFar = _inCombat ? (_farRadius * CombatFarScale) : _farRadius;
+                if (NearestPlayerDist(__instance) <= effectiveFar) return true;
                 _distOk++;
 
                 // 受伤检测：血量下降 → 立刻退出降频
@@ -333,8 +469,12 @@ namespace XsAILod
 
                 float now = (float)_clock.Elapsed.TotalSeconds;
 
-                // 每 30 秒打一次统计，方便确认降频是否真的在生效
-                if (now >= _nextStatsLog)
+                // 统计：第一次调用只启动计时，之后每 30 秒打一次
+                if (_nextStatsLog <= 0f)
+                {
+                    _nextStatsLog = now + 30f;   // 首帧：只开始计时，不打印
+                }
+                else if (now >= _nextStatsLog)
                 {
                     _nextStatsLog = now + 30f;
 
@@ -350,7 +490,8 @@ namespace XsAILod
                         LuaCsLogger.Log(
                             $"[XsAILod] 结果 | 跳过 {_skipped} | 通过 {_passed} | " +
                             $"跳过率 {(_skipped * 100.0 / totalCalls):F1}% | " +
-                            $"受伤唤醒 {_damagedWake} | 计时表 {_next.Count} 个");
+                            $"受伤唤醒 {_damagedWake} | 计时表 {_next.Count} 个 | " +
+                            $"战斗={(_inCombat ? "是" : "否")} | 当前远场={(_inCombat ? _farRadius * CombatFarScale : _farRadius):F0}px");
                     }
                     else
                     {
@@ -384,6 +525,13 @@ namespace XsAILod
         }
 
         // ---------- 外部可调 ----------
+        // ---------- 供 Lua 读取当前内存值（验证 GUI 是否真的调到了 C#） ----------
+        public static bool GetEnabled() { return _enabled; }
+        public static float GetFarRadius() { return _farRadius; }
+        public static float GetIdleInterval() { return _idleInterval; }
+        public static long GetSkipped() { return _skipped; }
+        public static long GetPassed() { return _passed; }
+
         public static void SetEnabled(bool v) { _enabled = v; LuaCsLogger.Log("[XsAILod] enabled=" + v); }
         public static void SetFarRadius(float r)
         {

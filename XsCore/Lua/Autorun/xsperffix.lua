@@ -174,25 +174,34 @@ local function Rescan()
 end
 
 -- ===================== 帧时间统计 =====================
+-- 环形缓冲：固定 600 帧循环覆盖
+-- 原实现用 table.remove(t, 1)，每帧要搬 599 个元素（O(n)），
+-- 60FPS 下等于每秒 3.6 万次数组搬移，纯浪费。
+local FRAME_CAP = 600
 local frameTimes = {}
+local frameIdx = 0
 local lastFrameTime = Timer.GetTime()
 
 local function TrackFrame()
     local now = Timer.GetTime()
-    frameTimes[#frameTimes + 1] = now - lastFrameTime
+    frameIdx = frameIdx % FRAME_CAP + 1
+    frameTimes[frameIdx] = now - lastFrameTime
     lastFrameTime = now
-    if #frameTimes > 600 then table.remove(frameTimes, 1) end
 end
 
 local function FrameStats()
-    if #frameTimes == 0 then return nil end
+    local n = 0
     local sum, mx = 0, 0
-    for i = 1, #frameTimes do
+    for i = 1, FRAME_CAP do
         local v = frameTimes[i]
-        sum = sum + v
-        if v > mx then mx = v end
+        if v ~= nil then
+            n = n + 1
+            sum = sum + v
+            if v > mx then mx = v end
+        end
     end
-    return sum / #frameTimes, mx, #frameTimes
+    if n == 0 then return nil end
+    return sum / n, mx, n
 end
 
 -- ===================== 钩子 =====================
