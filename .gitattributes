@@ -1,0 +1,28 @@
+# 统一换行，避免 CI 的 checkout 把文件转成 CRLF 让内容门禁误报。
+# 规则与 .github/scripts/package-release.ps1 的门禁 A / B / B2 一一对应。
+
+# 默认：文本按 LF 入库、按 LF 检出
+* text=auto eol=lf
+
+# 游戏内容包：Barotrauma 读的是 CRLF + UTF-8 BOM
+*.xml text eol=crlf
+*.sub text eol=crlf
+
+# 源码与文档：必须 LF（LuaCs 编译 .cs，MoonSharp 读 .lua，GitHub 渲染 .md）
+*.cs text eol=lf
+*.lua text eol=lf
+*.md text eol=lf
+*.ps1 text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.json text eol=lf
+VERSION text eol=lf
+GAMEVERSION text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+
+# 二进制
+*.zip binary
+*.dll binary
+*.png binary
+*.jpg binary
