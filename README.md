@@ -1,128 +1,155 @@
-# XsCore — Barotrauma 性能优化
+# XsCore 性能优化 for Barotrauma
 
-> 一套面向 Barotrauma 的性能优化模组，针对「AI 交战时卡顿」这一具体问题。
-> 当前适配游戏版本：**1.15.33.2**
+> 面向《潜渊症》的纯优化模组集，专门解决「AI 交战时卡顿」。
+> 模组版本：**1.0.0** ｜ 适配游戏：**1.15.33.2**
+> 唯一前提：**LuaCs 的 C# 脚本开关必须打开**
 
----
+English guide: see [README.en.md](README.en.md)
+
+## 简介
+
+《潜渊症》的 AI 开销不在「AI 数量」，而在「同一件事被每帧重复做」。本模组不删单位、不改数值、不动贴图和音效，只在引擎调用层拦掉三类重复劳动：
+
+| 重复劳动 | 谁在重复 | 拦法 |
+|---|---|---|
+| `<StatusEffect type="Always">` 没写 `interval` → 每帧执行 | 引擎，按内容包里的 XML 走 | 同一实例 1 秒才真执行一次 |
+| 站桩 NPC 每帧跑完整 `Update`（寻路+感知+状态机） | 前哨站 AI | 远场闲置单位降到 0.25 秒一次 |
+| 每个 AI 各自全量遍历物品表并新建 `List` | `AIObjectiveGetItem` | 按船缓存 0.5 秒，所有 AI 共享一份 |
+
+结果：状态效果调用量降 **27.5%**（549,720 次中拦截 151,400 次，1.13.5.0 实测数据），物品遍历从「33 份重复」降到「1 份复用」。
+
+## 更新日志
+
+完整变更记录见 [changes.md](changes.md)（English: [changes.en.md](changes.en.md)）。最新发布在 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) 页面。
+
+## 安装
+
+### 1. 下载并放置
+
+从 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) 下载 `XsCore-Barotrauma-v1.0.0.zip`（含两个模组），解压到游戏根目录，得到：
+
+```
+Barotrauma/LocalMods/XsCore/          三个 C# 插件 + 两个 Lua
+Barotrauma/LocalMods/XsBtFix/         Barotraumatic 间隔补丁（可选）
+```
+
+只想要性能优化、不玩 Barotraumatic 的，下载 `XsCore-v1.0.0.zip` 即可。
+
+### 2. 在游戏里启用
+
+`设置` → `模组` → 勾选 **XsCore 性能优化**。
+
+装了 Barotraumatic 并需要 `XsBtFix` 时，**必须把它排在 Barotraumatic 上面**（`XsBtFix` 是 `<Override>` 型补丁，排下面会被原包盖掉）。
+
+### 3. 确认 C# 开关
+
+| 游戏版本 | 位置 | 需要的值 |
+|---|---|---|
+| 1.15+（内置 LuaCs） | 游戏根目录 `LuaCsSetupConfig.xml` | `EnableCsScripting="true"` |
+| 1.13 及更早（工作坊 LuaCs） | `WorkshopMods/Installed/2559634234/Config/SettingsShared.xml` | `CsRunPolicy = Enabled` |
+
+C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分。
 
 ## 包含什么
 
 ### XsCore（主包）
 
-| 模块 | 层 | 作用 |
-|---|---|---|
-| **StatusThrottlePlugin** | C# | 状态效果节流：`type=Always` 且 `interval<=0` 的效果降到 1 秒一次 |
-| **AILodPlugin** | C# | 远处站着不动的 AI，`Update` 降到 0.25 秒一次 |
-| **GetItemsCachePlugin** | C# | 缓存 `Submarine.GetItems`，所有 AI 共享同一份物品列表（TTL 0.5s） |
-| **xsperffix.lua** | Lua | 战斗时把参战角色插进优先队列（检测到 Performance Fix 自动进兼容模式） |
-| **cl_status.lua** | Lua | 一键体检命令 |
+| 模块 | 层 | 管什么 | 参数 |
+|---|---|---|---|
+| **StatusThrottlePlugin** | C# | 状态效果节流 | `Always` 且 `interval<=0` → 1.0s 一次 |
+| **AILodPlugin** | C# | AI 距离分级 | 远场 6000px、闲置降频至 0.25s、移动中不降频 |
+| **GetItemsCachePlugin** | C# | `Submarine.GetItems` 缓存 | TTL 0.50s、按船实例、只缓存 `alsoFromConnectedSubs=true` |
+| **xsperffix.lua** | Lua | 战斗状态感知 | 参战角色插进优先队列，检出 Performance Fix 自动进兼容模式 |
+| **cl_status.lua** | Lua | 一键体检 | 命令 `cl_status` |
 
 ### XsBtFix（可选）
 
-给 Barotraumatic 的 Stalker / Teleglitch 补 `StatusEffect` 的 `interval`。
+只做一件事：给 Barotraumatic 的 Stalker / Teleglitch 补上 `type="Always"` 却漏写的 `interval`。BT 有 419 个 Always 效果，194 个没写 interval，其余交给 `StatusThrottlePlugin` 兜。
 
-**必须排在 Barotraumatic 上面。**
+## 命令
 
----
-
-## 解决什么问题
-
-Barotrauma 的 AI 开销主要来自两处：
-
-### ① 状态效果每帧执行
-
-```xml
-<StatusEffect type="Always" />
-```
-
-`type="Always"` 且没写 `interval` 时，引擎每帧执行它。
-Barotraumatic 有 419 个 Always 效果，其中 194 个没 interval。
-
-### ② AI 反复遍历物品
-
-`AIObjectiveGetItem.FindTargetItem()` 每扫完一轮物品就调用：
-
-```csharp
-itemList = character.Submarine.GetItems(alsoFromConnectedSubs: true);
-```
-
-而 `GetItems` 内部是 `Item.ItemList.FindAll(...)`——遍历全部物品并新建 List。
-
-33 个 AI 各自独立调用 = 33 份重复全量遍历。
-
----
-
-## 安装
-
-1. 把 `XsCore` 文件夹放进 `Barotrauma/LocalMods/`
-2. 启动游戏 → `设置` → `模组` → 勾选 `XsCore 性能优化`
-3. **确保 C# 允许**：
-   - 游戏 1.15+：`LuaCsSetupConfig.xml` 里 `EnableCsScripting="true"`
-   - 游戏 1.13：LuaCs 的 `SettingsShared.xml` 里 `CsRunPolicy="Enabled"`
-
-`XsBtFix` 同理，但**加载顺序必须在 Barotraumatic 之上**。
-
----
+| 命令 | 归属 | 作用 |
+|---|---|---|
+| `cl_status` | XsCore | 一键体检：Lua 层 / C# 层 / 运行时三栏 |
+| `cl_perf` | XsCore | 帧时间统计 |
+| `cl_perf_mode` | XsCore | 确认兼容模式还是独立模式 |
+| `cl_perf_toggle` | XsCore | 开关战斗感知 |
+| `cl_btfix_stat` | XsBtFix | BT 补丁统计 |
 
 ## 验证
 
-启动后看控制台，三行都应该在：
+启动后打开控制台（` 键），这四行都应该在：
 
 ```
-[XsStatusThrottle] 已加载 | interval字段=Interval | type字段=Type(属性) | 已 patch N 个 Apply 重载
+[XsStatusThrottle] 已加载 | interval字段=Interval | type字段=Type(属性) | 已 patch N 个 Apply 重载 | 节流 1.00s
 [XsAILod] 已加载 | 远场 6000px | 闲置 AI 降频至 0.25s | 已 patch N 个 Update 重载
-[XsGetItemsCache] 初始化 | TTL=0.50s
+[XsGetItemsCache] 初始化 | TTL=0.50s | 缓存 Submarine.GetItems，所有 AI 共享
+[XsPerf] 已启用：模式=独立/兼容 | 战区半径=3000
 ```
 
-游戏内命令：
-
-| 命令 | 作用 |
-|---|---|
-| `cl_status` | 一键体检所有优化模块 |
-| `cl_perf` | 帧时间统计 |
-| `cl_perf_mode` | 兼容/独立模式 |
-
-30 秒后应该看到缓存命中率：
+进游戏 30 秒后：
 
 ```
 [XsGetItemsCache] 命中 X/Y (Z%) | 缓存条目 N
 ```
 
-命中率越高效果越好（目标 > 80%）。
+命中率越高越好，目标 **> 80%**。低于 50% 说明没有 AI 在频繁调用 `GetItems`，那这部分开销本来就不在你的机器上。
 
----
+## 兼容性
 
-## 与 Performance Fix 的关系
+### 与 Performance Fix
 
 **不冲突，互补**。
 
 | 系统 | 管什么 |
 |---|---|
-| **Performance Fix** | 全局 tick 节奏、interval、光影合并 |
-| **XsCore** | 拦截具体调用、按条件跳过 |
+| Performance Fix | 全局 tick 节奏、interval、光影合并 |
+| XsCore | 拦截具体引擎调用、按条件跳过 |
 
-`xsperffix.lua` 检测到 Performance Fix 时会自动进入**兼容模式**：不接管 interval，只做战斗优先级。
+`xsperffix.lua` 启动时检测 Performance Fix，检出就进**兼容模式**：不接管 interval、不动优先级表，只追加战斗参与者。日志里会打印 `模式=兼容`。
 
----
+### 与 Barotraumatic
+
+`XsBtFix` 只覆盖两个生物文件，`<Override>` 方式，不改原包。排序错了不会崩，只是补丁不生效。
+
+### 与 1.15 官方优化
+
+1.15 的 `Optimizations` 章节做了三件与我们重叠的事，**收益会被官方吃掉一部分**：
+
+| 官方改动 | 对本模组的影响 |
+|---|---|
+| 离屏 ragdoll 停用更激进 | AILod 收益下降 |
+| 前哨站 NPC AI 优化 | AILod 收益下降 |
+| `OnlyInside/OnlyOutside` 状态效果无目标时不再执行 | StatusThrottle 收益下降 |
+
+`GetItemsCache` 不受影响——官方日志没提 `AIObjectiveGetItem` 或 `Submarine.GetItems`。
 
 ## 已知限制
 
 | 项 | 说明 |
 |---|---|
-| **GetItems 缓存共享 List** | 若下游有写入会互相污染；当前 `FindTargetItem` 只读，安全 |
-| **AILod 跳过 Update** | 1.15 的 `Update(float, Camera)` 带 Camera 参数，跳过可能影响摄像机逻辑（只跳远处站桩 AI） |
-| **cl_status 的 C# 栏** | C# 插件是静态类，Lua 查不到，只能看启动日志 |
+| **GetItems 缓存共享 List** | 下游若写入会互相污染；当前 `FindTargetItem` 只读，安全 |
+| **AILod 跳过 Update** | 1.15 的签名是 `Update(float, Camera)`，跳过会连带跳过其中的相机相关分支；只跳「远场 + 闲置 + 不动」的单位 |
+| **C# 插件失败不报错到界面** | 编译失败只写日志，看不到就说没生效 |
+| **cl_status 的 C# 栏是间接指标** | 插件是编译进 DLL 的静态类，Lua 查不到实例，只能看启动日志 |
 
----
+## 开发
 
-## 版本历史
+```powershell
+# 1. 提交前先跑编译校验（需要本机装有游戏）
+pwsh -File tools\verify-compile.ps1
 
-| 版本 | 变更 |
-|---|---|
-| 1.15.33.2 | 适配 `StatusEffect.Interval`（大写 readonly）、`Type`（属性） |
-| 1.13.5.0 | 首版，三个 C# 插件实测通过 |
+# 2. 打包 + 全部门禁（版本号/编码/XML）
+pwsh -File .github\scripts\package-release.ps1
 
----
+# 3. 产物在 build\release-assets\
+```
+
+修改 `VERSION` 后推送 `main`，GitHub Actions 会自动打 `v<版本>` 标签并发布 Release。`VERSION` 与两个 `filelist.xml` 的 `modversion` 必须一致，否则门禁直接失败。
+
+## 相关项目
+
+同一作者的 Dugong Refit 潜艇改型（独立包，未在此仓库发布）：外壳 200→400、引擎 270→520、反应堆 3000→6500，三个制造台、三门 coilgun、自动反应堆。
 
 ## 许可
 

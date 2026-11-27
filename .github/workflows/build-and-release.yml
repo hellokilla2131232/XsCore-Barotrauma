@@ -1,0 +1,251 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: '0 18 * * *'
+  workflow_dispatch:
+    inputs:
+      release_mode:
+        description: 'auto: 发布 v<Version>（标签已存在则跳过）| nightly: 发每日预发布 | build_only: 只打包不发布'
+        required: false
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - nightly
+          - build_only
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: 门禁 & 打包
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 版本信息
+        shell: pwsh
+        run: |
+          $v = (Get-Content VERSION -Raw).Trim()
+          $g = (Get-Content GAMEVERSION -Raw).Trim()
+          "MOD_VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "GAME_VERSION=$g" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "### XsCore $v （游戏 $g）" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: 门禁 + 打包
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          pwsh -NoProfile -File .github/scripts/package-release.ps1 -OutputDir 'build/release-assets'
+          if ($LASTEXITCODE -ne 0) { throw "package-release.ps1 失败，退出码 $LASTEXITCODE" }
+
+      - name: 编译校验（有公开引用程序集时）
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          # CI 上没有游戏本体，verify-compile 会自行跳过；本步骤只在本机/自建 runner 上有意义
+          if (Test-Path 'tools/verify-compile.ps1') {
+            pwsh -NoProfile -File tools/verify-compile.ps1 -AllowSkip
+          }
+
+      - name: 产物清单
+        shell: pwsh
+        run: |
+          Get-ChildItem build/release-assets -File | ForEach-Object {
+            "- ``$($_.Name)`` — $([math]::Round($_.Length/1KB,1)) KB" |
+              Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: xs-release-assets
+          path: build/release-assets/*
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: 打标签 & 发布 Release
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载产物
+        uses: actions/download-artifact@v4
+        with:
+          name: xs-release-assets
+          path: release-assets
+
+      - name: 决定标签、生成更新说明
+        id: decide
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_RELEASE_MODE: ${{ inputs.release_mode }}
+          CURRENT_SHA: ${{ github.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+
+          MOD_VERSION="$(tr -d '[:space:]' < VERSION)"
+          if [[ -z "${MOD_VERSION}" ]]; then
+            echo "::error::VERSION 为空"
+            exit 1
+          fi
+          VERSION_TAG="v${MOD_VERSION}"
+          echo "检测到 VERSION=${MOD_VERSION} → ${VERSION_TAG}"
+
+          git fetch origin --tags --force
+
+          case "${EVENT_NAME}" in
+            push)             MODE="auto" ;;
+            schedule)         MODE="nightly" ;;
+            workflow_dispatch) MODE="${INPUT_RELEASE_MODE:-auto}" ;;
+            *)                MODE="build_only" ;;
+          esac
+
+          # 从 changes.md 抽取对应版本的段落作为 Release 说明
+          notes_for() {
+            awk -v v="$1" '
+              /^## / { if (inblock) exit; if (index($0, "## " v) == 1) { inblock=1; next } }
+              inblock { print }
+            ' changes.md
+          }
+
+          emit_notes() {
+            local body
+            body="$(notes_for "$1" || true)"
+            if [[ -z "${body//[[:space:]]/}" ]]; then
+              body="$(awk '/^## /{ if (found) exit; found=1; next } found' changes.md || true)"
+            fi
+            {
+              echo "${body}"
+              echo ""
+              echo "**完整变更记录**：[changes.md](https://github.com/${GITHUB_REPOSITORY}/blob/${CURRENT_SHA}/changes.md) ｜ [changes.en.md](https://github.com/${GITHUB_REPOSITORY}/blob/${CURRENT_SHA}/changes.en.md)"
+              echo ""
+              echo "**适配游戏版本**：$(tr -d '[:space:]' < GAMEVERSION)"
+            } > release_body.md
+          }
+
+          tag_exists() {
+            local t="$1" alt="" rc=0 cand
+            if [[ "${t}" == v* ]]; then alt="V${t#v}"; elif [[ "${t}" == V* ]]; then alt="v${t#V}"; fi
+            for cand in "${t}" ${alt:+"${alt}"}; do
+              rc=0
+              git ls-remote --exit-code --tags origin "refs/tags/${cand}" >/dev/null 2>&1 || rc=$?
+              if [[ "${rc}" -eq 0 ]]; then return 0
+              elif [[ "${rc}" -ne 2 ]]; then
+                echo "::error::git ls-remote 查询 refs/tags/${cand} 失败（退出码 ${rc}）" >&2
+                exit "${rc}"
+              fi
+            done
+            return 1
+          }
+
+          verify_assets() {
+            shopt -s nullglob
+            local zips=(release-assets/*.zip)
+            shopt -u nullglob
+            if [[ ${#zips[@]} -eq 0 ]]; then
+              echo "::error::release-assets 里没有任何 zip" >&2
+              exit 1
+            fi
+            if [[ ! -s release-assets/SHA256SUMS.txt ]]; then
+              echo "::error::缺少 SHA256SUMS.txt" >&2
+              exit 1
+            fi
+            ( cd release-assets && sha256sum -c SHA256SUMS.txt )
+          }
+
+          if [[ "${MODE}" == "build_only" ]]; then
+            echo "模式 build_only：只打包，不发布。"
+            echo "should_release=false" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if [[ "${MODE}" == "auto" ]]; then
+            if tag_exists "${VERSION_TAG}"; then
+              echo "标签 ${VERSION_TAG} 已存在，跳过正式发布（要发新版请先改 VERSION）。"
+              echo "### 已存在标签 ${VERSION_TAG}，跳过发布" >> "${GITHUB_STEP_SUMMARY}"
+              echo "should_release=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            verify_assets
+            emit_notes "${MOD_VERSION}"
+            git tag -a "${VERSION_TAG}" "${CURRENT_SHA}" -m "Release ${VERSION_TAG}"
+            git push origin "refs/tags/${VERSION_TAG}"
+            {
+              echo "should_release=true"
+              echo "target_tag=${VERSION_TAG}"
+              echo "release_name=XsCore ${VERSION_TAG}"
+              echo "prerelease=false"
+              echo "make_latest=true"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          if [[ "${MODE}" == "nightly" ]]; then
+            EXISTING_LOCAL="$(git tag --points-at "${CURRENT_SHA}" 'v*' 'V*' || true)"
+            if [[ "${EVENT_NAME}" == "schedule" && -n "${EXISTING_LOCAL}" ]]; then
+              echo "当前提交已有标签（${EXISTING_LOCAL}），跳过期 nightly。"
+              echo "should_release=false" >> "${GITHUB_OUTPUT}"
+              exit 0
+            fi
+            UTC_DATE="$(date -u +%Y%m%d)"
+            BASE="v${MOD_VERSION}-nightly.${UTC_DATE}"
+            if tag_exists "${BASE}"; then TARGET="${BASE}.${RUN_NUMBER}"; else TARGET="${BASE}"; fi
+            verify_assets
+            emit_notes "${MOD_VERSION}"
+            git tag -a "${TARGET}" "${CURRENT_SHA}" -m "Nightly pre-release ${TARGET}"
+            git push origin "refs/tags/${TARGET}"
+            {
+              echo "should_release=true"
+              echo "target_tag=${TARGET}"
+              echo "release_name=XsCore ${TARGET} (Nightly)"
+              echo "prerelease=true"
+              echo "make_latest=false"
+            } >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "::error::不支持的 release_mode '${MODE}'"
+          exit 1
+
+      - name: 发布
+        if: steps.decide.outputs.should_release == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.decide.outputs.target_tag }}
+          name: ${{ steps.decide.outputs.release_name }}
+          prerelease: ${{ steps.decide.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.decide.outputs.make_latest }}
+          body_path: release_body.md
+          fail_on_unmatched_files: true
+          files: |
+            release-assets/*.zip
+            release-assets/SHA256SUMS.txt

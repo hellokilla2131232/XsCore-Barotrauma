@@ -1,18 +1,24 @@
-# 编译产物
-*.dll
-*.pdb
-*.deps.json
+# 打包产物
+build/
+*.zip
+
+# 编译校验临时产物
+.ref/
+obj/
+bin/
 
 # IDE
 .vs/
 .vscode/
 *.user
-*.suo
 
 # 系统
 Thumbs.db
 .DS_Store
 
-# 游戏运行时
+# 游戏运行时（反编译参考 / LuaCs 缓存）
 LuaCs.Temp/
 *.log
+
+# 内部交接笔记（含本机绝对路径，不入库）
+docs/
