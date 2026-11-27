@@ -1,0 +1,18 @@
+# 编译产物
+*.dll
+*.pdb
+*.deps.json
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# 系统
+Thumbs.db
+.DS_Store
+
+# 游戏运行时
+LuaCs.Temp/
+*.log

@@ -1,0 +1,7 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<contentpackage name="XsCore 性能优化" corepackage="false" modversion="1.0" gameversion="1.15.33.2">
+  <!-- 纯性能优化包，不依赖任何内容模组
+       C# : StatusThrottle（状态效果节流） + AILod（AI 距离分级）
+       Lua: xsperffix（战斗状态感知，自动兼容 Performance Fix）
+       使用前提：LuaCs 设置里 Are C# Mods Allowed 必须为 Enabled -->
+</contentpackage>
