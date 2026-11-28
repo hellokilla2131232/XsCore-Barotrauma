@@ -434,88 +434,114 @@ namespace XsAILod
         }
 
         // ---------- 战斗状态判定（每 0.5 秒一次）----------
-        // 判定依据：我方队伍（同 TeamID）的总血量是否下降。
-        // 不判断敌我、不依赖任何 mod 的阵营配置——只认「自己人在流血」这个硬事实。
-        // 掉血后战斗状态保持 CombatHoldSeconds 秒，避免战斗中出现「打一下停三秒」的空档。
+        // 两条独立触发，任一成立即进入战斗（保持 CombatHoldSeconds 秒）：
+        //   1) 我方队伍（同 TeamID）总血量下降 —— 有人在挨打
+        //   2) 玩家 3000px 内存在 EnemyAIController 且其 State 为 Attack/Aggressive/PassiveAggressive
+        //      —— 怪物已经进入攻击状态，即使玩家先手秒杀也算交火
+        // 刻意不判断敌我关系（IsHostileTo），因为阵营配置可被任何 mod 覆盖。
         private static void UpdateCombatState(float now)
         {
             if (!_combatAuto)
             {
-                if (_lastInCombat) { _lastInCombat = false; }
                 _inCombat = false;
+                _lastTeamHealth = -1f;
+                _combatUntil = 0f;
                 return;
             }
 
-            if (now >= _nextCombatCheck)
+            if (now < _nextCombatCheck) return;
+            _nextCombatCheck = now + 0.5f;
+
+            // PvP 模式：没有「AI 参战」概念，战斗自适应直接失效
+            try
             {
-                _nextCombatCheck = now + 0.5f;
-
-                // PVP 模式：没有「AI 参战」的概念，战斗自适应直接失效
-                try
-                {
-                    if (GameMain.GameSession?.GameMode is PvPMode)
-                    {
-                        if (_lastInCombat)
-                        {
-                            _lastInCombat = false;
-                            LuaCsLogger.Log("[XsAILod] PVP 模式，战斗自适应失效");
-                        }
-                        _inCombat = false;
-                        return;
-                    }
-                }
-                catch { }
-
-                try
-                {
-                    Character pc = Character.Controlled;
-                    if (pc == null || pc.IsDead)
-                    {
-                        _inCombat = false;
-                        _lastTeamHealth = -1f;
-                        _combatUntil = 0f;
-                    }
-                    else
-                    {
-                        var team = pc.TeamID;   // 1.15 是 CharacterTeamType 枚举，不是 byte
-
-                        float total = 0f;
-                        int count = 0;
-
-                        foreach (Character c in Character.CharacterList)
-                        {
-                            if (c == null || c.IsDead || c.Removed) continue;
-                            if (c.TeamID != team) continue;   // 只算同队
-                            total += GetHealth(c);
-                            count++;
-                        }
-
-                        if (count > 0)
-                        {
-                            // 总血量下降 → 有人在挨打 → 进入/延长战斗
-                            if (_lastTeamHealth >= 0f && total < _lastTeamHealth - 0.0001f)
-                            {
-                                _combatUntil = now + CombatHoldSeconds;
-                            }
-                            _lastTeamHealth = total;
-                        }
-                    }
-                }
-                catch
+                if (GameMain.GameSession?.GameMode is PvPMode)
                 {
                     _inCombat = false;
+                    _lastTeamHealth = -1f;
+                    _combatUntil = 0f;
+                    return;
+                }
+            }
+            catch { }
+
+            try
+            {
+                Character pc = Character.Controlled;
+                if (pc == null || pc.IsDead)
+                {
+                    _inCombat = false;
+                    _lastTeamHealth = -1f;
+                    _combatUntil = 0f;
+                    return;
                 }
 
+                Vector2 pPos = pc.WorldPosition;
+
+                // ---- 判定 1：我方队伍掉血 ----
+                var team = pc.TeamID;   // 1.15 是 CharacterTeamType 枚举
+                float total = 0f;
+                int count = 0;
+
+                foreach (Character c in Character.CharacterList)
+                {
+                    if (c == null || c.IsDead || c.Removed) continue;
+                    if (c.TeamID != team) continue;
+                    total += GetHealth(c);
+                    count++;
+                }
+
+                bool teamDamaged = false;
+                if (count > 0)
+                {
+                    if (_lastTeamHealth >= 0f && total < _lastTeamHealth - 0.0001f)
+                        teamDamaged = true;
+                    _lastTeamHealth = total;
+                }
+
+                // ---- 判定 2：附近有怪物在攻击状态 ----
+                bool enemyAttacking = false;
+                if (!teamDamaged)
+                {
+                    foreach (Character c in Character.CharacterList)
+                    {
+                        if (c == null || c.IsDead || c.Removed) continue;
+                        if (!(c.AIController is EnemyAIController eac)) continue;
+
+                        AIState st = eac.State;
+                        if (st != AIState.Attack
+                            && st != AIState.Aggressive
+                            && st != AIState.PassiveAggressive)
+                            continue;
+
+                        if (Vector2.DistanceSquared(c.WorldPosition, pPos) <= 3000f * 3000f)
+                        {
+                            enemyAttacking = true;
+                            break;
+                        }
+                    }
+                }
+
+                // ---- 任一成立 → 战斗 ----
+                if (teamDamaged || enemyAttacking)
+                {
+                    _combatUntil = now + CombatHoldSeconds;
+                    Diag($"战斗触发 | 掉血={teamDamaged} | 怪物攻击={enemyAttacking}");
+                }
+
+                bool wasIn = _inCombat;
                 _inCombat = (now < _combatUntil);
 
-                if (_inCombat != _lastInCombat)
+                if (_inCombat != wasIn)
                 {
-                    _lastInCombat = _inCombat;
                     LuaCsLogger.Log(
-                        $"[XsAILod] 战斗状态 {( _inCombat ? "开始" : "结束")} | " +
-                        $"远场 {(_inCombat ? _farRadius * CombatFarScale : _farRadius):F0}px | " +
-                        $"t={now:F0}s");
+                        $"[XsAILod] 战斗状态 {(_inCombat ? "开始" : "结束")} | " +
+                        $"远场 {(_inCombat ? _farRadius * CombatFarScale : _farRadius):F0}px | t={now:F0}s");
                 }
+            }
+            catch
+            {
+                _inCombat = false;
             }
         }
 
