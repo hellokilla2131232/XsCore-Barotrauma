@@ -137,7 +137,6 @@ Game.AddCommand("cl_status", "检查所有优化模组的加载状态", function
     print("  cl_perf_mode     兼容/独立模式")
     print("  cl_light_probe   光照度与物种判定（XsLight）")
     print("  cl_light         切换光照感知")
-    print("  cl_btfix_stat    BT 补丁统计（若装了 XsBtFix）")
     print("========================================")
     print("")
 end)

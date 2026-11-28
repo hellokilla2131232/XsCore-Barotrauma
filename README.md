@@ -1,7 +1,7 @@
 # XsCore 性能优化 for Barotrauma
 
-> 面向《潜渊症》的纯优化模组集，专门解决「AI 交战时卡顿」。
-> 模组版本：**1.0.0** ｜ 适配游戏：**1.15.33.2**
+> 面向《潜渊症》的纯优化模组，专门解决「AI 交战时卡顿」。
+> 模组版本：**1.1.1** ｜ 适配游戏：**1.15.33.2**
 > 唯一前提：**LuaCs 的 C# 脚本开关必须打开**
 
 English guide: see [README.en.md](README.en.md)
@@ -26,28 +26,26 @@ English guide: see [README.en.md](README.en.md)
 
 ### 1. 下载并放置
 
-从 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) 下载 **`XsCore-Barotrauma-v*.zip`**（含两个模组），解压到游戏根目录，得到：
+从 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) 下载 **`XsCore-v*.zip`**，解压到游戏根目录，得到：
 
 ```
-Barotrauma/LocalMods/XsCore/          三个 C# 插件 + 两个 Lua
-Barotrauma/LocalMods/XsBtFix/         Barotraumatic 间隔补丁（可选）
+Barotrauma/LocalMods/XsCore/          三个 C# 插件 + 五个 Lua
 ```
 
-**三个 zip 该下哪个**：
+**Release 页面里该下哪个**：
 
-| 文件 | 内容 | 适用 |
+| 文件 | 是什么 | 要不要下 |
 |---|---|---|
-| **`XsCore-Barotrauma-v*.zip`** | 两个模组都有 | **绝大多数人下这个** |
-| `XsCore-v*.zip` | 只有性能优化 | 不玩 Barotraumatic |
-| `XsBtFix-v*.zip` | 只有 BT 补丁 | 已经有 XsCore |
+| **`XsCore-v*.zip`** | 模组本体 | **下这个，唯一要下的** |
+| `SHA256SUMS.txt` | 三个产物的校验值 | 可选，想验证下载完整就下 |
+| `Source code (zip / tar.gz)` | GitHub 自动生成的仓库源码 | **不要下**，不是可用的模组包 |
+| `Release attestation (json)` | GitHub 自动生成的构建溯源 | 不要下 |
 
-**不要下 `Source code`**——那是 GitHub 自动生成的源码，不是可用的模组包。
+只有**一个** zip，不存在「该装哪个」的选择。
 
 ### 2. 在游戏里启用
 
 `设置` → `模组` → 勾选 **XsCore 性能优化**。
-
-装了 Barotraumatic 并需要 `XsBtFix` 时，**必须把它排在 Barotraumatic 上面**（`XsBtFix` 是 `<Override>` 型补丁，排下面会被原包盖掉）。
 
 ### 3. 确认 C# 开关
 
@@ -89,19 +87,18 @@ C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分
 | **xsperffix.lua** | Lua | 战斗状态感知 | 参战角色插进优先队列，检出 Performance Fix 自动进兼容模式 |
 | **cl_status.lua** | Lua | 一键体检 | 命令 `cl_status` |
 
-### XsBtFix（可选）
+### XsCore 是唯一包
 
-只做一件事：给 Barotraumatic 的 Stalker / Teleglitch 补上 `type="Always"` 却漏写的 `interval`。BT 有 419 个 Always 效果，194 个没写 interval，其余交给 `StatusThrottlePlugin` 兜。
+不装任何附属补丁。Barotraumatic 之类的怪物 mod 漏写 `interval` 的 `type="Always"` 效果，全部由 `StatusThrottlePlugin` 在代码层统一兜住——BT 里有 194 处这样写，覆盖范围远超逐个改 XML 的做法，而且不会因为 mod 更新而失效。
 
 ## 命令
 
-| 命令 | 归属 | 作用 |
-|---|---|---|
-| `cl_status` | XsCore | 一键体检：Lua 层 / C# 层 / 运行时三栏 |
-| `cl_perf` | XsCore | 帧时间统计 |
-| `cl_perf_mode` | XsCore | 确认兼容模式还是独立模式 |
-| `cl_perf_toggle` | XsCore | 开关战斗感知 |
-| `cl_btfix_stat` | XsBtFix | BT 补丁统计 |
+| 命令 | 作用 |
+|---|---|
+| `cl_status` | 一键体检：Lua 层 / C# 层 / 运行时三栏 |
+| `cl_perf` | 帧时间统计 |
+| `cl_perf_mode` | 确认兼容模式还是独立模式 |
+| `cl_perf_toggle` | 开关战斗感知 |
 
 ## 验证
 
@@ -137,7 +134,17 @@ C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分
 
 ### 与 Barotraumatic
 
-`XsBtFix` 只覆盖两个生物文件，`<Override>` 方式，不改原包。排序错了不会崩，只是补丁不生效。
+**不需要任何兼容补丁**。
+
+XsCore 1.1.0 之前发过一个 `XsBtFix`（整份复制 BT 的 `bt_stalker.xml` / `bt_teleglitch.xml`，只补 `interval`），1.1.1 起**已移除**。原因：
+
+| 问题 | 说明 |
+|---|---|
+| 覆盖不全 | 只补 2 个生物的 6 处，BT 里有 194 处同类写法 |
+| 会过时 | 整份复制怪物定义，BT 一更新就回滚到旧版 |
+| 排序脆弱 | `<Override>` 型排错位置就静默失效 |
+
+`StatusThrottlePlugin` 在代码层拦的是**所有**内容包的 `type="Always"` 且 `interval<=0` 的效果，BT 更新也不受影响。
 
 ### 与 1.15 官方优化
 

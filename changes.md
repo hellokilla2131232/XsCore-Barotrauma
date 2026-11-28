@@ -1,6 +1,32 @@
 # XsCore 更新日志
 
-> English changelog: see [changes.en.md](changes.en.md)
+## 1.1.1
+
+清理冗余。移除 `XsBtFix` 附属包，`XsCore` 成为唯一包。
+
+### 移除
+
+**XsBtFix（整个模组包）**
+
+它做的事是整份复制 Barotraumatic 的 `bt_stalker.xml`（11,739 B）和 `bt_teleglitch.xml`（11,077 B），只往 `type="Always"` 的 `StatusEffect` 上补 `interval` 属性——两个文件加起来 12 处。
+
+| 问题 | 数据 |
+|---|---|
+| 覆盖不全 | 只补 2 个生物的 12 处；BT 里同类写法有 **194 处**，`StatusThrottlePlugin` 一个都不漏 |
+| 会过时 | 整份复制怪物定义。BT 更新属性后，装了 XsBtFix 等于把 Stalker 回滚到旧版 |
+| 排序脆弱 | `<Override>` 型必须排在 Barotraumatic 上面，排错位置静默失效，用户无提示 |
+
+`StatusThrottlePlugin` 从 1.0.0 起就在代码层拦**所有**内容包的 `type="Always"` 且 `interval<=0` 效果，BT 更新也不受影响。XsBtFix 从设计上就是重复劳动。
+
+**下载选择也随之简化**：Release 页面现在只有一个 zip（`XsCore-v*.zip`），不再有「该下哪个」的困惑。
+
+**废弃文件 `TargetThrottlePlugin.cs`**
+
+666 B 的空壳，只打两行 `[XsTargetThrottle] 已加载（最简版，无 patch）` 日志，没有任何 patch 逻辑。功能早就合并进 `AILodPlugin.cs`，这个文件是验证 LuaCs 能否加载新增 `.cs` 时的残留。留着的唯一后果是让用户看日志时困惑。
+
+### 版本
+
+`VERSION` / `filelist.xml` 同步为 `1.1.1`，游戏版本仍为 `1.15.33.2`。
 
 ## 1.1.0
 

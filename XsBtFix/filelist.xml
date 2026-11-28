@@ -1,8 +1,0 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<contentpackage name="XsBtFix BT间隔补丁" corepackage="false" modversion="1.1.0" gameversion="1.15.33.2">
-  <!-- 仅修饰 Barotraumatic 的 Stalker / Teleglitch：
-       给 type=Always 且无 interval 的 StatusEffect 补 interval，其余原样。
-       必须在模组列表里排在 Barotraumatic 上面。 -->
-  <Character file="%ModDir%/Characters/bt_stalker.xml" />
-  <Character file="%ModDir%/Characters/bt_teleglitch.xml" />
-</contentpackage>

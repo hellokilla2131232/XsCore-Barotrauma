@@ -1,7 +1,7 @@
 # XsCore Performance Optimizer for Barotrauma
 
-> A pure optimization mod pack for *Barotrauma*, built around one specific problem: **stutter during AI combat**.
-> Mod version: **1.0.0** ｜ Target game: **1.15.33.2**
+> A pure optimization mod for *Barotrauma*, built around one specific problem: **stutter during AI combat**.
+> Mod version: **1.1.1** ｜ Target game: **1.15.33.2**
 > Only requirement: **C# scripting must be enabled in LuaCs**
 
 中文说明：[README.md](README.md)
@@ -26,28 +26,26 @@ Full history in [changes.md](changes.md) (Chinese, the canonical log). Latest bu
 
 ### 1. Download and place
 
-Grab **`XsCore-Barotrauma-v*.zip`** (both mods) from [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) and extract it into the game root so you get:
+Grab **`XsCore-v*.zip`** from [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) and extract it into the game root so you get:
 
 ```
-Barotrauma/LocalMods/XsCore/          three C# plugins + two Lua scripts
-Barotrauma/LocalMods/XsBtFix/         Barotraumatic interval patch (optional)
+Barotrauma/LocalMods/XsCore/          three C# plugins + five Lua scripts
 ```
 
-**Which zip to pick**:
+**Which file on the Release page**:
 
-| File | Contents | For |
+| File | What it is | Download? |
 |---|---|---|
-| **`XsCore-Barotrauma-v*.zip`** | Both mods | **Most users** |
-| `XsCore-v*.zip` | Performance only | No Barotraumatic |
-| `XsBtFix-v*.zip` | Barotraumatic patch only | Already have XsCore |
+| **`XsCore-v*.zip`** | The mod itself | **Yes — the only one you need** |
+| `SHA256SUMS.txt` | Checksums of the built artifacts | Optional, for verifying the download |
+| `Source code (zip / tar.gz)` | GitHub auto-generated repo snapshot | **No** — not a usable mod package |
+| `Release attestation (json)` | GitHub build provenance | No |
 
-**Do not download `Source code`**: that is the GitHub auto-generated source archive, not a usable mod package.
+There is only **one** zip, so there is no “which one do I install” choice.
 
 ### 2. Enable in game
 
 `Settings` → `Mods` → tick **XsCore 性能优化**.
-
-When you also need `XsBtFix`, **it must load above Barotraumatic** — `XsBtFix` uses `<Override>`, so loading it underneath lets the original package win.
 
 ### 3. Confirm the C# switch
 
@@ -89,19 +87,18 @@ Restart the server to apply. Singleplayer is unaffected.
 | **xsperffix.lua** | Lua | Combat awareness | Pushes combat participants into the priority queue; auto-detects Performance Fix and switches to compatible mode |
 | **cl_status.lua** | Lua | One-shot health check | Command `cl_status` |
 
-### XsBtFix (optional)
+### XsCore is the only package
 
-Does exactly one thing: fills in the missing `interval` on Barotraumatic's Stalker / Teleglitch `type="Always"` effects. BT ships 419 Always effects, 194 of them without an interval; `StatusThrottlePlugin` covers the rest.
+No companion patch is needed. Any `type="Always"` effect missing an `interval` — from Barotraumatic or any other content pack — is covered centrally by `StatusThrottlePlugin` at the code level. BT alone ships 194 such effects; patching XML files one by one cannot scale to that, and would silently rot every time the source mod updates.
 
 ## Commands
 
-| Command | Owner | Purpose |
-|---|---|---|
-| `cl_status` | XsCore | Health check: Lua layer / C# layer / runtime |
-| `cl_perf` | XsCore | Frame-time statistics |
-| `cl_perf_mode` | XsCore | Confirm compatible vs standalone mode |
-| `cl_perf_toggle` | XsCore | Toggle combat awareness |
-| `cl_btfix_stat` | XsBtFix | BT patch statistics |
+| Command | Purpose |
+|---|---|
+| `cl_status` | Health check: Lua layer / C# layer / runtime |
+| `cl_perf` | Frame-time statistics |
+| `cl_perf_mode` | Confirm compatible vs standalone mode |
+| `cl_perf_toggle` | Toggle combat awareness |
 
 ## Verifying
 
@@ -137,7 +134,17 @@ No conflict — they are complementary.
 
 ### With Barotraumatic
 
-`XsBtFix` overrides exactly two creature files via `<Override>` and never edits the original package. A wrong load order will not crash anything — the patch just does not apply.
+**No compatibility patch required.**
+
+XsCore shipped an `XsBtFix` companion before 1.1.0 (a full copy of BT's `bt_stalker.xml` / `bt_teleglitch.xml` with `interval` attributes added). It was **removed in 1.1.1**:
+
+| Problem | Detail |
+|---|---|
+| Incomplete coverage | Patched 6 effects across 2 creatures; BT contains 194 of the same pattern |
+| Goes stale | Full copies of creature definitions roll back to an old BT version on every BT update |
+| Fragile load order | An `<Override>` package silently does nothing if loaded below the original |
+
+`StatusThrottlePlugin` intercepts **every** `type="Always"` effect with `interval<=0` across all content packs, and is immune to BT updates.
 
 ### With 1.15's official optimizations
 
