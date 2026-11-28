@@ -106,6 +106,7 @@ jobs:
           INPUT_RELEASE_MODE: ${{ inputs.release_mode }}
           CURRENT_SHA: ${{ github.sha }}
           RUN_NUMBER: ${{ github.run_number }}
+          GH_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
 
@@ -164,6 +165,21 @@ jobs:
             return 1
           }
 
+          # 判断某个 tag 在 GitHub 上是否已经有 Release
+          # 用于「标签在、但 Release 因为历史原因没发出去」时补发，而不是无脑跳过
+          release_exists() {
+            local t="$1" code
+            code="$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${GH_API_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/releases/tags/${t}" || echo 000)"
+            case "${code}" in
+              200) return 0 ;;
+              404) return 1 ;;
+              *)   echo "::error::查询 Release ${t} 失败（HTTP ${code}）" >&2; exit 2 ;;
+            esac
+          }
+
           verify_assets() {
             shopt -s nullglob
             local zips=(release-assets/*.zip)
@@ -190,15 +206,20 @@ jobs:
 
           if [[ "${MODE}" == "auto" ]]; then
             if tag_exists "${VERSION_TAG}"; then
-              echo "标签 ${VERSION_TAG} 已存在，跳过正式发布（要发新版请先改 VERSION）。"
-              echo "### 已存在标签 ${VERSION_TAG}，跳过发布" >> "${GITHUB_STEP_SUMMARY}"
-              echo "should_release=false" >> "${GITHUB_OUTPUT}"
-              exit 0
+              if release_exists "${VERSION_TAG}"; then
+                echo "标签 ${VERSION_TAG} 与 Release 都已存在，跳过正式发布（要发新版请先改 VERSION）。"
+                echo "### 已存在标签 ${VERSION_TAG} 与 Release，跳过发布" >> "${GITHUB_STEP_SUMMARY}"
+                echo "should_release=false" >> "${GITHUB_OUTPUT}"
+                exit 0
+              fi
+              echo "标签 ${VERSION_TAG} 已存在但 Release 缺失 → 补发 Release（复用已有标签）"
+              echo "### 标签 ${VERSION_TAG} 已存在，补发 Release" >> "${GITHUB_STEP_SUMMARY}"
+            else
+              git tag -a "${VERSION_TAG}" "${CURRENT_SHA}" -m "Release ${VERSION_TAG}"
+              git push origin "refs/tags/${VERSION_TAG}"
             fi
             verify_assets
             emit_notes "${MOD_VERSION}"
-            git tag -a "${VERSION_TAG}" "${CURRENT_SHA}" -m "Release ${VERSION_TAG}"
-            git push origin "refs/tags/${VERSION_TAG}"
             {
               echo "should_release=true"
               echo "target_tag=${VERSION_TAG}"
