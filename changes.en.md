@@ -2,6 +2,47 @@
 
 > 中文更新日志：[changes.md](changes.md)
 
+## 1.1.0
+
+Combat optimization release. Adds target-selection throttling and combat-adaptive AI LOD.
+
+### New
+
+**TargetThrottle (merged into AILodPlugin)**
+
+`EnemyAIController.UpdateTargets()` is 671 lines, with two nested `O(targets × characters)` loops at lines 3752 and 3933. Twenty monsters running it simultaneously means 24,000 checks per frame, about 1.44 million per second. That is the real source of the "one-time heavy computation" during combat.
+
+Fix: each monster only recomputes targets once every 3 frames, cutting overhead by 66% with a worst-case target-switch delay of 50 ms. Measured skip rate: 72.7% (11 samples; theoretical 66.7%).
+
+**Combat-adaptive AILod**
+
+Replaced distance-based combat detection with two objective triggers:
+
+1. The player team's (same TeamID) total health drops.
+2. An `EnemyAIController` is within 3000 px of the player with State Attack, Aggressive, or PassiveAggressive.
+
+When triggered, the far-field radius shrinks to 25% (1500 to 375 px) and recovers after 30 seconds. Hostility checks are deliberately avoided: `IsHostileTo` depends on team configuration that any mod can override. PvP mode disables the feature entirely.
+
+Measured: 1500 to 375 to 1500, held for 40 seconds, then recovered automatically.
+
+### Fixed
+
+- `Character.TeamID` is a `CharacterTeamType` enum in 1.15, not `byte`. Writing `byte team = pc.TeamID` raises CS0266 and invalidates the entire C# package.
+- Config file moved from the game root to the mod directory (`LocalMods/XsCore/AILod.cfg`). LuaCs `File.*` can only write inside the mod directory.
+- The C# side now resolves the same path through `TryGetPackageForPlugin<AILodPlugin>() → pkg.Dir`.
+
+### Improved
+
+- AILod gained a GUI panel (`XsCore · AI LOD`) with sliders, numeric input, and suggested ranges.
+- New `AILod_diag.log`: records every PatchAll step at startup, working around the console having no search.
+- `xsperffix.lua`'s `TrackFrame` now uses a ring buffer, removing the per-frame `table.remove(t, 1)` O(n) shift (saves 35,940 array moves per second).
+- Adjusted suggested ranges: far field 6000-8000 to 1500-3000 (1500 already yields a 93% skip rate in testing).
+
+### Known limitations
+
+- Only CPU-side logic is optimized; GPU rendering is untouched. There is no benefit when the GPU is the bottleneck (many lights, heavy shadows).
+- Multiplayer servers must manually change `RunConfig.xml`'s `<Server>` to `Standard`.
+
 ## 1.0.0
 
 First release. One goal: stop the stutter during AI combat. Every change lives at the engine call layer — no characters removed, no stats touched, no textures or sounds modified.

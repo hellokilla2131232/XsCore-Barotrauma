@@ -2,6 +2,47 @@
 
 > English changelog: see [changes.en.md](changes.en.md)
 
+## 1.1.0
+
+战斗优化专题。新增目标选择节流，AILod 加战斗自适应。
+
+### 新增
+
+**TargetThrottle（合并进 AILodPlugin）**
+
+`EnemyAIController.UpdateTargets()` 共 671 行，行 3752 / 3933 各有一处 `O(目标数 × 角色数)` 的嵌套遍历。20 个怪物同时跑 = 24,000 次判断/帧 = 144 万次/秒，这是战斗时「一次性大量计算」的主因。
+
+做法：每个怪物每 3 帧才算一次目标，省 66% 开销，目标切换延迟最多 50ms。实测跳过率 72.7%（样本 11 次，理论 66.7%）。
+
+**AILod 战斗自适应**
+
+从「按距离判定战斗」改成「按客观信号判定」，两条独立触发：
+
+1. 我方队伍（同 TeamID）总血量下降
+2. 玩家 3000px 内存在 `EnemyAIController` 且 State 为 Attack / Aggressive / PassiveAggressive
+
+触发后远场半径自动缩到 25%（1500 → 375px），保持 30 秒后恢复。不判断敌我关系（`IsHostileTo` 依赖 mod 可改的阵营配置）。PvP 模式直接停用。
+
+实测：1500 → 375 → 1500，保持 40 秒后自动恢复。
+
+### 修复
+
+- `Character.TeamID` 在 1.15 是 `CharacterTeamType` 枚举，不是 `byte`。写 `byte team = pc.TeamID` 会导致 CS0266 编译错误，进而**整个 C# 包作废**。
+- 配置文件路径从游戏根目录改到模组目录（`LocalMods/XsCore/AILod.cfg`）——LuaCs 的 `File.*` 只能写模组目录。
+- C# 侧用 `TryGetPackageForPlugin<AILodPlugin>() → pkg.Dir` 拿同一个路径。
+
+### 改进
+
+- AILod 新增 GUI 面板（`XsCore · AI LOD`），滑块 + 输入框 + 范围建议
+- 新增 `AILod_diag.log`：启动时记录 PatchAll 每一步，绕过控制台无法搜索的限制
+- `xsperffix.lua` 的 `TrackFrame` 改用环形缓冲，去掉每帧 `table.remove(t, 1)` 的 O(n) 搬运（每秒省 35,940 次）
+- 建议值调整：远场 6000~8000 → 1500~3000（实测 1500 就有 93% 跳过率）
+
+### 已知限制
+
+- 只优化 CPU 逻辑层，不动 GPU 渲染。GPU 瓶颈（灯光多、阴影多）时无效。
+- 多人服务端需要手动把 `RunConfig.xml` 的 `<Server>` 改成 `Standard`。
+
 ## 1.0.0
 
 首版发布。目标只有一个：让 AI 交战时不再卡。全部改动都在引擎调用层，不删单位、不改数值、不动贴图和音效。

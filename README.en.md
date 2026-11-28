@@ -50,6 +50,24 @@ When you also need `XsBtFix`, **it must load above Barotraumatic** — `XsBtFix`
 
 With C# disabled the three plugins are never compiled; only the Lua half runs.
 
+### 4. Multiplayer servers (optional)
+
+`RunConfig.xml` ships with `<Server>None</Server>`, which means **servers do not load the C# plugins**.
+
+In multiplayer, AI logic runs on the server. To let the server benefit, change:
+
+```xml
+<Server>None</Server>
+```
+
+to:
+
+```xml
+<Server>Standard</Server>
+```
+
+Restart the server to apply. Singleplayer is unaffected.
+
 ## What is inside
 
 ### XsCore (main package)
@@ -57,8 +75,9 @@ With C# disabled the three plugins are never compiled; only the Lua half runs.
 | Module | Layer | Purpose | Parameters |
 |---|---|---|---|
 | **StatusThrottlePlugin** | C# | Status-effect throttling | `Always` with `interval<=0` → once per 1.0 s |
-| **AILodPlugin** | C# | Distance-based AI LOD | 6000 px far radius, idle units at 0.25 s, moving units never throttled |
+| **AILodPlugin** | C# | Distance-based AI LOD + combat adaptation | Adjustable far radius (default 2000 px), idle units at 0.25 s, shrinks to 25% during combat |
 | **GetItemsCachePlugin** | C# | `Submarine.GetItems` cache | 0.50 s TTL, per submarine, only `alsoFromConnectedSubs=true` |
+| **TargetThrottle** (merged into AILod) | C# | AI target-selection throttle | Each monster computes `UpdateTargets` once per 3 frames, saving 66% |
 | **xsperffix.lua** | Lua | Combat awareness | Pushes combat participants into the priority queue; auto-detects Performance Fix and switches to compatible mode |
 | **cl_status.lua** | Lua | One-shot health check | Command `cl_status` |
 

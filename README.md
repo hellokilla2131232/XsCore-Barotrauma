@@ -50,6 +50,24 @@ Barotrauma/LocalMods/XsBtFix/         Barotraumatic 间隔补丁（可选）
 
 C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分。
 
+### 4. 多人服务器（可选）
+
+`RunConfig.xml` 默认是 `<Server>None</Server>`，**服务端不加载 C# 插件**。
+
+多人游戏里 AI 逻辑在服务端跑，想让服务器也享受优化，需要把：
+
+```xml
+<Server>None</Server>
+```
+
+改成：
+
+```xml
+<Server>Standard</Server>
+```
+
+改完重启服务器生效。单人游玩不受影响。
+
 ## 包含什么
 
 ### XsCore（主包）
@@ -57,8 +75,9 @@ C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分
 | 模块 | 层 | 管什么 | 参数 |
 |---|---|---|---|
 | **StatusThrottlePlugin** | C# | 状态效果节流 | `Always` 且 `interval<=0` → 1.0s 一次 |
-| **AILodPlugin** | C# | AI 距离分级 | 远场 6000px、闲置降频至 0.25s、移动中不降频 |
+| **AILodPlugin** | C# | AI 距离分级 + 战斗自适应 | 远场可调（默认 2000px）、闲置降频至 0.25s、战斗中自动缩到 25% |
 | **GetItemsCachePlugin** | C# | `Submarine.GetItems` 缓存 | TTL 0.50s、按船实例、只缓存 `alsoFromConnectedSubs=true` |
+| **TargetThrottle**（合并进 AILod） | C# | AI 目标选择节流 | 每个怪物每 3 帧算一次 `UpdateTargets`，省 66% |
 | **xsperffix.lua** | Lua | 战斗状态感知 | 参战角色插进优先队列，检出 Performance Fix 自动进兼容模式 |
 | **cl_status.lua** | Lua | 一键体检 | 命令 `cl_status` |
 
