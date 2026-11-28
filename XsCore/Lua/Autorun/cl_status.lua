@@ -4,7 +4,6 @@
 -- =====================================================================
 
 local MOD_PATH = select(1, ...)
-print("[cl_status] MOD_PATH = [" .. tostring(MOD_PATH) .. "]")
 
 local function ok(b) return b and "[OK]" or "[--]" end
 
@@ -64,10 +63,19 @@ Game.AddCommand("cl_status", "检查所有优化模组的加载状态", function
         end
 
         local exists, content = false, nil
-        pcall(function()
-            exists = System.IO.File.Exists(cfgPath)
-            if exists then content = System.IO.File.ReadAllText(cfgPath) end
-        end)
+
+        -- 多层回退：System.IO 在 LuaCs 沙箱里可能不可用，退回 File.*
+        pcall(function() exists = System.IO.File.Exists(cfgPath) end)
+        if not exists then
+            pcall(function() exists = File.Exists(cfgPath) end)
+        end
+
+        if exists then
+            pcall(function() content = System.IO.File.ReadAllText(cfgPath) end)
+            if content == nil then
+                pcall(function() content = File.Read(cfgPath) end)
+            end
+        end
 
         if exists and content and content ~= "" then
             print("  [OK] AILod.cfg 已存在")

@@ -1,5 +1,3 @@
-print(">>> cl_ailod.lua 已开始执行 <<<")
-
 -- =====================================================================
 -- cl_ailod — AILod 参数设置面板 + 控制台命令
 --
@@ -32,7 +30,6 @@ print(">>> cl_ailod.lua 已开始执行 <<<")
 --   `...` 是 LuaCs 传给 Autorun 脚本的 varargs，值就是模组根目录。
 --   游戏根目录对 Lua 是只读的（写了静默失败），必须用模组目录。
 local MOD_PATH = select(1, ...)
-print("[AILod] MOD_PATH = [" .. tostring(MOD_PATH) .. "]")
 
 local function GetCfgPath()
     if type(MOD_PATH) == "string" and MOD_PATH ~= "" then
@@ -451,8 +448,6 @@ local function ShowStatus()
 end
 
 Game.AddCommand("cl_ailod", "查看/设置 AILod 参数", function (args)
-    -- 调试：把 args 的真实类型和值打出来
-    print("[AILod] args type=" .. type(args) .. " value=[" .. tostring(args) .. "]")
 
     -- LuaCs 的 AddCommand 回调第一个参数是 table（参数数组）
     local parts = {}

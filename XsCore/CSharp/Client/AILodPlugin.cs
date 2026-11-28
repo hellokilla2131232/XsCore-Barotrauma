@@ -84,6 +84,18 @@ namespace XsAILod
         private static readonly Stopwatch _clock = Stopwatch.StartNew();
 
         private static long _skipped;
+
+        // ---------- 目标选择节流（EnemyAIController.UpdateTargets）----------
+        // UpdateTargets 共 671 行，行 3752 / 3933 各有一处 O(目标×角色) 嵌套遍历。
+        // 20 个怪物 = 24000 次/帧 = 144 万次/秒，这是战斗时「一次性大量计算」的主因。
+        // 每 _targetInterval 帧才算一次（N=3 省 66%）。
+        private static int _targetPatched;
+        private static int _targetInterval = 3;
+        private static readonly Dictionary<EnemyAIController, int> _targetFrames
+            = new Dictionary<EnemyAIController, int>();
+        private static long _targetSkipped;
+        private static long _targetPassed;
+        private static float _nextTargetLog;
         private static long _passed;
         private static int _patched;
         private static float _nextStatsLog = 0f;   // 统计日志节流
@@ -118,6 +130,18 @@ namespace XsAILod
         public void Initialize()
         {
             LuaCsLogger.Log("[XsAILod] Initialize 被调用");
+
+            // 清空上一次的诊断日志
+            try
+            {
+                string dir0 = Path.GetDirectoryName(ConfigPath);
+                if (string.IsNullOrEmpty(dir0)) dir0 = ".";
+                File.WriteAllText(Path.Combine(dir0, "AILod_diag.log"),
+                    $"=== XsCore 启动 {DateTime.Now:yyyy-MM-dd HH:mm:ss} ===\n",
+                    new UTF8Encoding(false));
+            }
+            catch { }
+            Diag("Initialize 完成");
             _harmony = new Harmony("xs.ailod");
         }
 
@@ -134,10 +158,27 @@ namespace XsAILod
         {
             EnsureDefaultConfig();
 
+            Diag($"OnLoadCompleted 开始 | 配置路径={ConfigPath}");
             PatchAll();
+            Diag($"OnLoadCompleted 结束 | patch Update={_patched} | patch UpdateTargets={_targetPatched}");
             LuaCsLogger.Log(string.Format(
                 "[XsAILod] 已加载 | 远场 {0:F0}px | 闲置 AI 降频至 {1:F2}s | 已 patch {2} 个 Update 重载",
                 _farRadius, _idleInterval, _patched));
+        }
+
+        // ---------- 诊断日志（控制台不好搜，直接写文件）----------
+        private static void Diag(string msg)
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(ConfigPath);
+                if (string.IsNullOrEmpty(dir)) dir = ".";
+                string path = Path.Combine(dir, "AILod_diag.log");
+                File.AppendAllText(path,
+                    $"[{DateTime.Now:HH:mm:ss}] {msg}\n",
+                    new UTF8Encoding(false));
+            }
+            catch { }
         }
 
         // ---------- 首次启动时创建默认配置文件 ----------
@@ -245,6 +286,7 @@ namespace XsAILod
             if (_harmony == null) return;
             try
             {
+                Diag("PatchAll: 进入 try");
                 var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
                 var prefix = new HarmonyMethod(
                     AccessTools.Method(typeof(AILodPlugin), nameof(Prefix)));
@@ -262,10 +304,94 @@ namespace XsAILod
                         LuaCsLogger.LogError("[XsAILod] patch Update 失败: " + e.Message);
                     }
                 }
+
+                Diag($"PatchAll: Character.Update 处理完 | patch {_patched} 个");
+
+                // 顺手挂上 EnemyAIController.UpdateTargets 节流
+                try
+                {
+                    Diag("PatchAll: 开始处理 EnemyAIController");
+
+                    var tPrefix = new HarmonyMethod(
+                        AccessTools.Method(typeof(AILodPlugin), nameof(TargetPrefix)));
+                    if (tPrefix == null) { Diag("!! TargetPrefix 方法找不到"); }
+                    else { Diag("TargetPrefix 方法已找到"); }
+
+                    Diag($"EnemyAIController 类型 = {typeof(EnemyAIController).FullName}");
+                    var tFlags2 = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                    foreach (var tm in typeof(EnemyAIController).GetMethods(tFlags2))
+                    {
+                        if (tm.Name != "UpdateTargets") continue;
+                        Diag($"找到 UpdateTargets: {tm.DeclaringType.Name}.{tm.Name}");
+                        try
+                        {
+                            _harmony.Patch(tm, prefix: tPrefix);
+                            _targetPatched++;
+                            Diag($"UpdateTargets patch 成功 | 累计 {_targetPatched}");
+                        }
+                        catch (Exception te)
+                        {
+                            LuaCsLogger.LogError("[XsAILod] patch UpdateTargets 单次失败: " + te.Message);
+                        }
+                    }
+                    LuaCsLogger.Log(
+                        $"[XsTargetThrottle] UpdateTargets 已挂载 | 每 {_targetInterval} 帧算一次 | patch {_targetPatched} 个");
+                }
+                catch (Exception e2)
+                {
+                    LuaCsLogger.LogError("[XsAILod] patch UpdateTargets 失败: " + e2.Message);
+                }
             }
             catch (Exception e)
             {
                 LuaCsLogger.LogError("[XsAILod] PatchAll 失败: " + e.Message);
+            }
+        }
+
+        // ---------- 目标选择节流 Prefix ----------
+        private static bool TargetPrefix(EnemyAIController __instance)
+        {
+            if (_targetInterval <= 1 || __instance == null) return true;
+
+            try
+            {
+                float now = (float)_clock.Elapsed.TotalSeconds;
+
+                // 统计：首帧只计时，之后每 30 秒一次
+                if (_nextTargetLog <= 0f)
+                {
+                    _nextTargetLog = now + 30f;
+                }
+                else if (now >= _nextTargetLog)
+                {
+                    _nextTargetLog = now + 30f;
+                    long total = _targetSkipped + _targetPassed;
+                    if (total > 0)
+                    {
+                        LuaCsLogger.Log(
+                            $"[XsTargetThrottle] 统计 | 跳过 {_targetSkipped} | 通过 {_targetPassed} | " +
+                            $"跳过率 {(_targetSkipped * 100.0 / total):F1}% | 计时表 {_targetFrames.Count} 个");
+                    }
+                }
+
+                _targetFrames.TryGetValue(__instance, out int f);
+                f++;
+
+                if (f < _targetInterval)
+                {
+                    _targetFrames[__instance] = f;
+                    _targetSkipped++;
+                    return false;
+                }
+
+                _targetFrames[__instance] = 0;
+                _targetPassed++;
+                if (_targetFrames.Count > 3000) _targetFrames.Clear();
+                return true;
+            }
+            catch
+            {
+                return true;
             }
         }
 
