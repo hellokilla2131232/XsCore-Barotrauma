@@ -1,8 +1,15 @@
 # XsCore Performance Optimizer for Barotrauma
 
+[![Download latest](https://img.shields.io/badge/Download-Latest-brightgreen?style=for-the-badge)](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest)
+[![Barotrauma](https://img.shields.io/badge/Barotrauma-1.15.33.2-blue)](https://github.com/hellokilla2131232/XsCore-Barotrauma)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/hellokilla2131232/XsCore-Barotrauma)](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases)
+
 > A pure optimization mod for *Barotrauma*, built around one specific problem: **stutter during AI combat**.
 > Mod version: **1.1.1** ｜ Target game: **1.15.33.2**
 > Only requirement: **C# scripting must be enabled in LuaCs**
+
+**Download**: <https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest>
 
 中文说明：[README.md](README.md)
 

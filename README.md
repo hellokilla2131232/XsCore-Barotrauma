@@ -1,8 +1,15 @@
 # XsCore 性能优化 for Barotrauma
 
+[![下载最新版](https://img.shields.io/badge/%E4%B8%8B%E8%BD%BD-%E6%9C%80%E6%96%B0%E7%89%88-brightgreen?style=for-the-badge)](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest)
+[![Barotrauma](https://img.shields.io/badge/Barotrauma-1.15.33.2-blue)](https://github.com/hellokilla2131232/XsCore-Barotrauma)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/hellokilla2131232/XsCore-Barotrauma)](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases)
+
 > 面向《潜渊症》的纯优化模组，专门解决「AI 交战时卡顿」。
 > 模组版本：**1.1.1** ｜ 适配游戏：**1.15.33.2**
 > 唯一前提：**LuaCs 的 C# 脚本开关必须打开**
+
+**下载地址**：<https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest>
 
 English guide: see [README.en.md](README.en.md)
 
