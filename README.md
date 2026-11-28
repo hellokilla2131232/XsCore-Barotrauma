@@ -20,7 +20,7 @@ English guide: see [README.en.md](README.en.md)
 
 ## 更新日志
 
-完整变更记录见 [changes.md](changes.md)（English: [changes.en.md](changes.en.md)）。最新发布在 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) 页面。
+完整变更记录见 [changes.md](changes.md)。最新发布在 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) 页面。
 
 ## 安装
 
@@ -156,7 +156,7 @@ C# 开关关掉的话，三个插件不会编译，剩下的只有 Lua 那部分
 
 ```powershell
 # 1. 提交前先跑编译校验（需要本机装有游戏）
-pwsh -File tools\verify-compile.ps1
+pwsh -File .github\scripts\verify-compile.ps1
 
 # 2. 打包 + 全部门禁（版本号/编码/XML）
 pwsh -File .github\scripts\package-release.ps1

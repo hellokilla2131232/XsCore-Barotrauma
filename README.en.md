@@ -20,7 +20,7 @@ Result: status-effect call volume down **27.5%** (151,400 of 549,720 calls inter
 
 ## Changelog
 
-Full history in [changes.en.md](changes.en.md) (中文: [changes.md](changes.md)). Latest build on the [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) page.
+Full history in [changes.md](changes.md) (Chinese, the canonical log). Latest build on the [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) page.
 
 ## Installation
 
@@ -156,7 +156,7 @@ The 1.15 `Optimizations` section covers three things that overlap with this mod,
 
 ```powershell
 # 1. Compile check before committing (requires the game installed locally)
-pwsh -File tools\verify-compile.ps1
+pwsh -File .github\scripts\verify-compile.ps1
 
 # 2. Package + all gates (version / encoding / XML)
 pwsh -File .github\scripts\package-release.ps1

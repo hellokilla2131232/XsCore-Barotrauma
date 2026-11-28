@@ -59,8 +59,8 @@ jobs:
         continue-on-error: true
         run: |
           # CI 上没有游戏本体，verify-compile 会自行跳过；本步骤只在本机/自建 runner 上有意义
-          if (Test-Path 'tools/verify-compile.ps1') {
-            pwsh -NoProfile -File tools/verify-compile.ps1 -AllowSkip
+          if (Test-Path '.github/scripts/verify-compile.ps1') {
+            pwsh -NoProfile -File .github/scripts/verify-compile.ps1 -AllowSkip
           }
 
       - name: 产物清单
@@ -143,7 +143,7 @@ jobs:
             {
               echo "${body}"
               echo ""
-              echo "**完整变更记录**：[changes.md](https://github.com/${GITHUB_REPOSITORY}/blob/${CURRENT_SHA}/changes.md) ｜ [changes.en.md](https://github.com/${GITHUB_REPOSITORY}/blob/${CURRENT_SHA}/changes.en.md)"
+              echo "**完整变更记录**：[changes.md](https://github.com/${GITHUB_REPOSITORY}/blob/${CURRENT_SHA}/changes.md)"
               echo ""
               echo "**适配游戏版本**：$(tr -d '[:space:]' < GAMEVERSION)"
             } > release_body.md
