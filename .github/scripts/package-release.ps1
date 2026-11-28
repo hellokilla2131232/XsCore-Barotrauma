@@ -111,7 +111,7 @@ foreach ($mod in $modDirs) {
             ForEach-Object { $textFiles.Add($_.FullName) }
     }
 }
-foreach ($name in @("README.md", "README.en.md", "changes.md", "changes.en.md", "VERSION", "GAMEVERSION")) {
+foreach ($name in @("README.md", "README.en.md", "changes.md", "VERSION", "GAMEVERSION")) {
     $p = Join-Path $repoRoot $name
     if (Test-Path -LiteralPath $p) { $textFiles.Add($p) }
 }
