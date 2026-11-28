@@ -26,14 +26,22 @@ English guide: see [README.en.md](README.en.md)
 
 ### 1. 下载并放置
 
-从 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) 下载 `XsCore-Barotrauma-v1.0.0.zip`（含两个模组），解压到游戏根目录，得到：
+从 [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) 下载 **`XsCore-Barotrauma-v*.zip`**（含两个模组），解压到游戏根目录，得到：
 
 ```
 Barotrauma/LocalMods/XsCore/          三个 C# 插件 + 两个 Lua
 Barotrauma/LocalMods/XsBtFix/         Barotraumatic 间隔补丁（可选）
 ```
 
-只想要性能优化、不玩 Barotraumatic 的，下载 `XsCore-v1.0.0.zip` 即可。
+**三个 zip 该下哪个**：
+
+| 文件 | 内容 | 适用 |
+|---|---|---|
+| **`XsCore-Barotrauma-v*.zip`** | 两个模组都有 | **绝大多数人下这个** |
+| `XsCore-v*.zip` | 只有性能优化 | 不玩 Barotraumatic |
+| `XsBtFix-v*.zip` | 只有 BT 补丁 | 已经有 XsCore |
+
+**不要下 `Source code`**——那是 GitHub 自动生成的源码，不是可用的模组包。
 
 ### 2. 在游戏里启用
 

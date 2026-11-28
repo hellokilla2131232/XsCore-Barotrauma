@@ -26,14 +26,22 @@ Full history in [changes.md](changes.md) (Chinese, the canonical log). Latest bu
 
 ### 1. Download and place
 
-Grab `XsCore-Barotrauma-v1.0.0.zip` (both mods) from [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases) and extract it into the game root so you get:
+Grab **`XsCore-Barotrauma-v*.zip`** (both mods) from [Releases](https://github.com/hellokilla2131232/XsCore-Barotrauma/releases/latest) and extract it into the game root so you get:
 
 ```
 Barotrauma/LocalMods/XsCore/          three C# plugins + two Lua scripts
 Barotrauma/LocalMods/XsBtFix/         Barotraumatic interval patch (optional)
 ```
 
-If you do not run Barotraumatic, `XsCore-v1.0.0.zip` alone is enough.
+**Which zip to pick**:
+
+| File | Contents | For |
+|---|---|---|
+| **`XsCore-Barotrauma-v*.zip`** | Both mods | **Most users** |
+| `XsCore-v*.zip` | Performance only | No Barotraumatic |
+| `XsBtFix-v*.zip` | Barotraumatic patch only | Already have XsCore |
+
+**Do not download `Source code`**: that is the GitHub auto-generated source archive, not a usable mod package.
 
 ### 2. Enable in game
 
